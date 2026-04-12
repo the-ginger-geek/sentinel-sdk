@@ -27,7 +27,7 @@ const defaultEnvironmentMetadata = () => {
 };
 
 export class SentinelClient {
-  constructor({ baseUrl, apiKey, projectSlug, fetchImpl } = {}) {
+  constructor({ baseUrl, apiKey, projectSlug, userId, fetchImpl } = {}) {
     if (!baseUrl) throw new Error("baseUrl is required");
     if (!apiKey) throw new Error("apiKey is required");
     if (!projectSlug) throw new Error("projectSlug is required");
@@ -40,7 +40,12 @@ export class SentinelClient {
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
     this.projectSlug = projectSlug;
+    this.userId = userId || null;
     this.fetch = resolvedFetch;
+  }
+
+  setUserId(userId) {
+    this.userId = userId || null;
   }
 
   async log({ level, name, message = null, metadata = {}, timestamp } = {}) {
@@ -95,6 +100,10 @@ export class SentinelClient {
   }
 
   async #send(stream, event) {
+    if (this.userId) {
+      event.user_hash = this.userId;
+    }
+
     const payload = {
       stream,
       source: this.projectSlug,

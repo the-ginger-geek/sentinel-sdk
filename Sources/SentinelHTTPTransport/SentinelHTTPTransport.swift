@@ -6,12 +6,12 @@ public struct SentinelHTTPTransport {
     public let telemetrySink: TelemetrySink
     public let analyticsSink: AnalyticsSink
 
-    public init(baseURL: URL, apiKey: String, projectSlug: String) {
-        self.init(baseURL: baseURL, apiKey: apiKey, projectSlug: projectSlug, session: .shared)
+    public init(baseURL: URL, apiKey: String, projectSlug: String, userId: String? = nil) {
+        self.init(baseURL: baseURL, apiKey: apiKey, projectSlug: projectSlug, userId: userId, session: .shared)
     }
 
-    init(baseURL: URL, apiKey: String, projectSlug: String, session: URLSession) {
-        let client = Client(baseURL: baseURL, apiKey: apiKey, projectSlug: projectSlug, session: session)
+    init(baseURL: URL, apiKey: String, projectSlug: String, userId: String? = nil, session: URLSession) {
+        let client = Client(baseURL: baseURL, apiKey: apiKey, projectSlug: projectSlug, userId: userId, session: session)
         self.telemetrySink = TelemetryHTTPSink(client: client)
         self.analyticsSink = AnalyticsHTTPSink(client: client)
     }
@@ -20,40 +20,38 @@ public struct SentinelHTTPTransport {
         private let baseURL: URL
         private let apiKey: String
         private let projectSlug: String
+        private let userId: String?
         private let session: URLSession
 
-        init(baseURL: URL, apiKey: String, projectSlug: String, session: URLSession = .shared) {
+        init(baseURL: URL, apiKey: String, projectSlug: String, userId: String? = nil, session: URLSession = .shared) {
             self.baseURL = baseURL
             self.apiKey = apiKey
             self.projectSlug = projectSlug
+            self.userId = userId
             self.session = session
         }
 
         func sendTelemetry(_ event: TelemetryEvent) async {
-            await send(
-                stream: "telemetry",
-                source: projectSlug,
-                event: [
-                    "name": event.name,
-                    "level": event.level.rawValue,
-                    "message": event.message as Any,
-                    "metadata": jsonObject(event.metadata),
-                    "timestamp": event.timestamp.ISO8601Format(),
-                ]
-            )
+            var eventPayload: [String: Any] = [
+                "name": event.name,
+                "level": event.level.rawValue,
+                "message": event.message as Any,
+                "metadata": jsonObject(event.metadata),
+                "timestamp": event.timestamp.ISO8601Format(),
+            ]
+            if let userId { eventPayload["user_hash"] = userId }
+            await send(stream: "telemetry", source: projectSlug, event: eventPayload)
         }
 
         func sendAnalytics(_ event: AnalyticsEvent) async {
-            await send(
-                stream: "analytics",
-                source: projectSlug,
-                event: [
-                    "name": event.name,
-                    "kind": event.kind.rawValue,
-                    "properties": jsonObject(event.properties),
-                    "timestamp": event.timestamp.ISO8601Format(),
-                ]
-            )
+            var eventPayload: [String: Any] = [
+                "name": event.name,
+                "kind": event.kind.rawValue,
+                "properties": jsonObject(event.properties),
+                "timestamp": event.timestamp.ISO8601Format(),
+            ]
+            if let userId { eventPayload["user_hash"] = userId }
+            await send(stream: "analytics", source: projectSlug, event: eventPayload)
         }
 
         private func send(stream: String, source: String, event: [String: Any]) async {

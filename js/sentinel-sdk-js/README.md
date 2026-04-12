@@ -21,6 +21,7 @@ const sentinel = new SentinelClient({
   baseUrl: "https://<your-ingest-endpoint>",
   apiKey: "<api-key>",
   projectSlug: "<project-slug>",
+  userId: "<user-id-or-hash>",
 });
 ```
 
@@ -90,6 +91,27 @@ function App() {
   return <button onClick={handleUpgrade}>Upgrade</button>;
 }
 ```
+
+## User Identification
+
+Pass a `userId` at construction or update it later (e.g. after login):
+
+```javascript
+const sentinel = new SentinelClient({
+  baseUrl: "https://<your-ingest-endpoint>",
+  apiKey: "<api-key>",
+  projectSlug: "my-app",
+  userId: currentUser.id,
+});
+
+// Update after login
+sentinel.setUserId("user-456");
+
+// Clear on logout
+sentinel.setUserId(null);
+```
+
+The `userId` is sent as `user_hash` on every event, enabling per-issue affected user counts on the Sentinel dashboard.
 
 ## Custom Fetch
 

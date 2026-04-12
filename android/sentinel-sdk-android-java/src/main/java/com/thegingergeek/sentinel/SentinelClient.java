@@ -49,12 +49,17 @@ public final class SentinelClient {
     private final String apiKey;
     private final String projectSlug;
     private final HttpTransport transport;
+    private volatile String userId;
 
     public SentinelClient(String baseUrl, String apiKey, String projectSlug) {
-        this(baseUrl, apiKey, projectSlug, new DefaultHttpTransport());
+        this(baseUrl, apiKey, projectSlug, null, new DefaultHttpTransport());
     }
 
     public SentinelClient(String baseUrl, String apiKey, String projectSlug, HttpTransport transport) {
+        this(baseUrl, apiKey, projectSlug, null, transport);
+    }
+
+    public SentinelClient(String baseUrl, String apiKey, String projectSlug, String userId, HttpTransport transport) {
         if (baseUrl == null || baseUrl.isEmpty()) throw new IllegalArgumentException("baseUrl is required");
         if (apiKey == null || apiKey.isEmpty()) throw new IllegalArgumentException("apiKey is required");
         if (projectSlug == null || projectSlug.isEmpty()) throw new IllegalArgumentException("projectSlug is required");
@@ -63,7 +68,16 @@ public final class SentinelClient {
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
         this.projectSlug = projectSlug;
+        this.userId = userId;
         this.transport = transport;
+    }
+
+    public void setUserId(String userId) {
+        this.userId = userId;
+    }
+
+    public String getUserId() {
+        return this.userId;
     }
 
     public int log(TelemetryLevel level, String name, String message, Map<String, Object> metadata) throws IOException {
@@ -101,6 +115,11 @@ public final class SentinelClient {
     }
 
     private int send(String stream, Map<String, Object> event) throws IOException {
+        String currentUserId = this.userId;
+        if (currentUserId != null && !currentUserId.isEmpty()) {
+            event.put("user_hash", currentUserId);
+        }
+
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("stream", stream);
         payload.put("source", projectSlug);

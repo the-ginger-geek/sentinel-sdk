@@ -66,6 +66,20 @@ client.track("dark_mode_enabled", SentinelClient.AnalyticsKind.STATE, null);
 
 Available kinds: `SCREEN`, `ACTION`, `CONVERSION`, `STATE`
 
+## User Identification
+
+Set a user ID to track affected users per issue group on the Sentinel dashboard:
+
+```java
+// Set after login
+client.setUserId("user-123");
+
+// Or clear on logout
+client.setUserId(null);
+```
+
+The `userId` is sent as `user_hash` on every event. Use a stable identifier (e.g. Firebase UID, account ID). Thread-safe — can be updated at any time.
+
 ## Custom Transport
 
 The default transport uses `HttpURLConnection`. Inject a custom `HttpTransport` for testing or to use a different HTTP client (e.g. OkHttp):

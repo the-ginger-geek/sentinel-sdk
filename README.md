@@ -87,7 +87,8 @@ import Foundation
 let transport = SentinelHTTPTransport(
     baseURL: URL(string: "https://<your-ingest-endpoint>")!,
     apiKey: "<api-key>",
-    projectSlug: "<project-slug>"
+    projectSlug: "<project-slug>",
+    userId: "<user-id-or-hash>"
 )
 
 Sentinel.shared.register(sink: transport.telemetrySink)
@@ -134,6 +135,21 @@ The Swift SDK uses a sink-based pattern:
 
 Register custom sinks to route events to additional destinations (e.g. console, file, third-party services).
 
+### User Identification
+
+Pass a `userId` when creating the transport to track affected users per issue group on the dashboard:
+
+```swift
+let transport = SentinelHTTPTransport(
+    baseURL: URL(string: "https://<your-ingest-endpoint>")!,
+    apiKey: "<api-key>",
+    projectSlug: "ios-app",
+    userId: currentUser.id  // or a hashed identifier
+)
+```
+
+The `userId` is sent as `user_hash` on every event. Use a stable identifier (e.g. Firebase UID, account ID, or a SHA-256 hash of the user's email).
+
 ---
 
 ## Android (Java)
@@ -158,6 +174,9 @@ SentinelClient client = new SentinelClient(
     "<api-key>",
     "<project-slug>"
 );
+
+// Set user ID for affected-user tracking
+client.setUserId("<user-id-or-hash>");
 ```
 
 ### Telemetry
@@ -189,6 +208,26 @@ client.track("filter_applied", SentinelClient.AnalyticsKind.ACTION, Map.of("filt
 ```
 
 Available kinds: `SCREEN`, `ACTION`, `CONVERSION`, `STATE`
+
+### User Identification
+
+Set a user ID to track affected users per issue group on the dashboard:
+
+```java
+// At construction
+SentinelClient client = new SentinelClient(
+    "https://<your-ingest-endpoint>",
+    "<api-key>",
+    "android-app",
+    "user-123",              // userId
+    new DefaultHttpTransport()
+);
+
+// Or update later (e.g. after login)
+client.setUserId("user-123");
+```
+
+The `userId` is sent as `user_hash` on every event. Use a stable identifier (e.g. Firebase UID, account ID).
 
 ### Custom Transport
 
@@ -229,6 +268,7 @@ const sentinel = new SentinelClient({
   baseUrl: "https://<your-ingest-endpoint>",
   apiKey: "<api-key>",
   projectSlug: "<project-slug>",
+  userId: "<user-id-or-hash>",
 });
 ```
 
@@ -299,6 +339,24 @@ const sentinel = new SentinelClient({
   fetchImpl: customFetchFunction,
 });
 ```
+
+### User Identification
+
+Pass a `userId` at construction or update it later (e.g. after login):
+
+```javascript
+const sentinel = new SentinelClient({
+  baseUrl: "https://<your-ingest-endpoint>",
+  apiKey: "<api-key>",
+  projectSlug: "my-react-app",
+  userId: currentUser.id,
+});
+
+// Or update later
+sentinel.setUserId("user-456");
+```
+
+The `userId` is sent as `user_hash` on every event. Use a stable identifier (e.g. Firebase UID, account ID, or a hashed email).
 
 ### Environment Detection
 
