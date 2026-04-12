@@ -1,0 +1,2 @@
+/Users/neil/repositories/sentinel-sdk/android/sentinel-sdk-android-java/src/main/java/com/thegingergeek/sentinel/SentinelClient.java
+/Users/neil/repositories/sentinel-sdk/android/sentinel-sdk-android-java/src/main/java/com/thegingergeek/sentinel/JsonEncoder.java
