@@ -6,21 +6,30 @@ public struct SentinelHTTPTransport {
     public let telemetrySink: TelemetrySink
     public let analyticsSink: AnalyticsSink
 
+    private let client: Client
+
     public init(baseURL: URL, apiKey: String, projectSlug: String, userId: String? = nil) {
         self.init(baseURL: baseURL, apiKey: apiKey, projectSlug: projectSlug, userId: userId, session: .shared)
     }
 
     init(baseURL: URL, apiKey: String, projectSlug: String, userId: String? = nil, session: URLSession) {
         let client = Client(baseURL: baseURL, apiKey: apiKey, projectSlug: projectSlug, userId: userId, session: session)
+        self.client = client
         self.telemetrySink = TelemetryHTTPSink(client: client)
         self.analyticsSink = AnalyticsHTTPSink(client: client)
+    }
+
+    /// Update the user identifier sent on all subsequent events.
+    /// Pass `nil` to clear (e.g. on logout).
+    public func setUserId(_ userId: String?) {
+        Task { await client.setUserId(userId) }
     }
 
     private actor Client {
         private let baseURL: URL
         private let apiKey: String
         private let projectSlug: String
-        private let userId: String?
+        private var userId: String?
         private let session: URLSession
 
         init(baseURL: URL, apiKey: String, projectSlug: String, userId: String? = nil, session: URLSession = .shared) {
@@ -29,6 +38,10 @@ public struct SentinelHTTPTransport {
             self.projectSlug = projectSlug
             self.userId = userId
             self.session = session
+        }
+
+        func setUserId(_ userId: String?) {
+            self.userId = userId
         }
 
         func sendTelemetry(_ event: TelemetryEvent) async {
