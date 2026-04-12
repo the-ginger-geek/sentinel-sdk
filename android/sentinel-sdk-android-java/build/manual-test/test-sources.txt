@@ -1,1 +1,0 @@
-/Users/neil/repositories/sentinel-sdk/android/sentinel-sdk-android-java/src/test/java/com/thegingergeek/sentinel/SentinelClientTest.java
