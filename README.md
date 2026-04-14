@@ -135,7 +135,7 @@ const sentinel = createSentinelClientFromEnv();
 Add dependency in `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/the-ginger-geek/sentinel-sdk.git", from: "1.0.0")
+.package(url: "https://github.com/the-ginger-geek/sentinel-sdk.git", from: "1.2.0")
 ```
 
 Add products to your target:

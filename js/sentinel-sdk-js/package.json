@@ -1,6 +1,6 @@
 {
   "name": "@the-ginger-geek/sentinel-sdk",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Sentinel SDK for React/web/Node JavaScript apps",
   "type": "module",
   "main": "./src/index.js",
