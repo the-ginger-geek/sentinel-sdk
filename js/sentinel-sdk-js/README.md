@@ -25,6 +25,40 @@ const sentinel = new SentinelClient({
 });
 ```
 
+## Firebase Functions Integration
+
+The SDK includes a dedicated helper for Firebase Cloud Functions endpoints.
+
+```javascript
+import { createFirebaseFunctionsSentinelClient } from "@the-ginger-geek/sentinel-sdk";
+
+const sentinel = createFirebaseFunctionsSentinelClient({
+  projectId: "sentinel-8997b",
+  region: "us-central1",       // optional, default: us-central1
+  functionName: "ingestEvent", // optional, default: ingestEvent
+  apiKey: process.env.SENTINEL_API_KEY,
+  projectSlug: "my-server-app",
+});
+
+await sentinel.log({ level: "info", name: "function_started" });
+```
+
+You can also bootstrap from environment variables:
+
+```javascript
+import { FirebaseFunctionsSentinelClient } from "@the-ginger-geek/sentinel-sdk";
+
+const sentinel = FirebaseFunctionsSentinelClient.fromEnv();
+```
+
+Expected environment variables:
+
+- `SENTINEL_FIREBASE_PROJECT_ID` (required)
+- `SENTINEL_API_KEY` (required)
+- `SENTINEL_PROJECT_SLUG` (required)
+- `SENTINEL_FIREBASE_REGION` (optional, default `us-central1`)
+- `SENTINEL_FIREBASE_FUNCTION` (optional, default `ingestEvent`)
+
 ## Telemetry
 
 Log events at five severity levels:

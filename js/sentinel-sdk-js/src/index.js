@@ -26,6 +26,20 @@ const defaultEnvironmentMetadata = () => {
   return metadata;
 };
 
+const required = (value, field) => {
+  if (!value) {
+    throw new Error(`${field} is required`);
+  }
+  return value;
+};
+
+const toFirebaseFunctionsIngestUrl = ({ projectId, region = "us-central1", functionName = "ingestEvent" } = {}) => {
+  required(projectId, "projectId");
+  required(region, "region");
+  required(functionName, "functionName");
+  return `https://${region}-${projectId}.cloudfunctions.net/${functionName}`;
+};
+
 export class SentinelClient {
   constructor({ baseUrl, apiKey, projectSlug, userId, fetchImpl } = {}) {
     if (!baseUrl) throw new Error("baseUrl is required");
@@ -124,3 +138,43 @@ export class SentinelClient {
 }
 
 export const createSentinelClient = (config) => new SentinelClient(config);
+
+export class FirebaseFunctionsSentinelClient extends SentinelClient {
+  constructor({
+    projectId,
+    region = "us-central1",
+    functionName = "ingestEvent",
+    apiKey,
+    projectSlug,
+    userId,
+    fetchImpl,
+  } = {}) {
+    const baseUrl = toFirebaseFunctionsIngestUrl({ projectId, region, functionName });
+    super({ baseUrl, apiKey, projectSlug, userId, fetchImpl });
+    this.projectId = projectId;
+    this.region = region;
+    this.functionName = functionName;
+  }
+
+  static fromEnv({ env = process?.env, fetchImpl } = {}) {
+    const projectId = required(env?.SENTINEL_FIREBASE_PROJECT_ID, "SENTINEL_FIREBASE_PROJECT_ID");
+    const apiKey = required(env?.SENTINEL_API_KEY, "SENTINEL_API_KEY");
+    const projectSlug = required(env?.SENTINEL_PROJECT_SLUG, "SENTINEL_PROJECT_SLUG");
+    const region = env?.SENTINEL_FIREBASE_REGION || "us-central1";
+    const functionName = env?.SENTINEL_FIREBASE_FUNCTION || "ingestEvent";
+
+    return new FirebaseFunctionsSentinelClient({
+      projectId,
+      region,
+      functionName,
+      apiKey,
+      projectSlug,
+      fetchImpl,
+    });
+  }
+}
+
+export const createFirebaseFunctionsSentinelClient = (config) =>
+  new FirebaseFunctionsSentinelClient(config);
+
+export { toFirebaseFunctionsIngestUrl };

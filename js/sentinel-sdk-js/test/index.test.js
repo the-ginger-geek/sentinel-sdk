@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SentinelClient, createSentinelClient } from "../src/index.js";
+import {
+  SentinelClient,
+  createSentinelClient,
+  createFirebaseFunctionsSentinelClient,
+  FirebaseFunctionsSentinelClient,
+  toFirebaseFunctionsIngestUrl,
+} from "../src/index.js";
 
 test("log sends telemetry payload with auth header", async () => {
   const calls = [];
@@ -121,4 +127,70 @@ test("constructor validates required config", () => {
   assert.throws(() => new SentinelClient({ apiKey: "k", projectSlug: "p", fetchImpl: async () => ({}) }), /baseUrl/);
   assert.throws(() => new SentinelClient({ baseUrl: "u", projectSlug: "p", fetchImpl: async () => ({}) }), /apiKey/);
   assert.throws(() => new SentinelClient({ baseUrl: "u", apiKey: "k", fetchImpl: async () => ({}) }), /projectSlug/);
+});
+
+test("firebase helper builds expected Cloud Functions URL", () => {
+  assert.equal(
+    toFirebaseFunctionsIngestUrl({ projectId: "sentinel-8997b" }),
+    "https://us-central1-sentinel-8997b.cloudfunctions.net/ingestEvent",
+  );
+  assert.equal(
+    toFirebaseFunctionsIngestUrl({
+      projectId: "sentinel-8997b",
+      region: "europe-west1",
+      functionName: "customIngest",
+    }),
+    "https://europe-west1-sentinel-8997b.cloudfunctions.net/customIngest",
+  );
+});
+
+test("firebase client sends to firebase functions endpoint", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true, status: 200 };
+  };
+
+  const client = createFirebaseFunctionsSentinelClient({
+    projectId: "sentinel-8997b",
+    apiKey: "firebase-key",
+    projectSlug: "web-app",
+    fetchImpl,
+  });
+
+  await client.track({
+    name: "firebase_event",
+    kind: "action",
+    properties: { via: "helper" },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://us-central1-sentinel-8997b.cloudfunctions.net/ingestEvent");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer firebase-key");
+});
+
+test("firebase client supports env bootstrap", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true, status: 200 };
+  };
+
+  const client = FirebaseFunctionsSentinelClient.fromEnv({
+    env: {
+      SENTINEL_FIREBASE_PROJECT_ID: "sentinel-8997b",
+      SENTINEL_FIREBASE_REGION: "us-central1",
+      SENTINEL_FIREBASE_FUNCTION: "ingestEvent",
+      SENTINEL_API_KEY: "env-key",
+      SENTINEL_PROJECT_SLUG: "server-app",
+    },
+    fetchImpl,
+  });
+
+  await client.log({ level: "info", name: "env_bootstrap" });
+
+  assert.equal(calls[0].url, "https://us-central1-sentinel-8997b.cloudfunctions.net/ingestEvent");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer env-key");
+  const payload = JSON.parse(calls[0].init.body);
+  assert.equal(payload.source, "server-app");
 });
