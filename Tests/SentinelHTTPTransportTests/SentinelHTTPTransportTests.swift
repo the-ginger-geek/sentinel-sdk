@@ -117,6 +117,18 @@ struct SentinelHTTPTransportTests {
     }
 
     @Test
+    func endpointResolutionPrefersIngestURL() throws {
+        let resolution = try SentinelHTTPTransport.resolveIngestEndpoint(
+            .init(
+                ingestURL: URL(string: "https://ingest.example.com/ingestEvent")
+            )
+        )
+
+        #expect(resolution.mode == .explicitURL)
+        #expect(resolution.url.absoluteString == "https://ingest.example.com/ingestEvent")
+    }
+
+    @Test
     func endpointResolutionUsesEnvURLBeforeDerived() throws {
         let resolution = try SentinelHTTPTransport.resolveIngestEndpoint(
             .init(
@@ -178,21 +190,21 @@ struct SentinelHTTPTransportTests {
     func telemetrySinkSendsExpectedPayloadAndHeaders() async throws {
         MockURLProtocol.capture.reset()
 
-    let session = makeSession()
-    let transport = SentinelHTTPTransport(
-        baseURL: URL(string: "https://ingest.example.com/v1/events")!,
-        apiKey: "test-key",
-        projectSlug: "tally-app",
-        session: session
-    )
+        let session = makeSession()
+        let transport = SentinelHTTPTransport(
+            baseURL: URL(string: "https://ingest.example.com/v1/events")!,
+            apiKey: "test-key",
+            projectSlug: "tally-app",
+            session: session
+        )
 
-    let event = TelemetryEvent(
-        level: .error,
-        name: "network_failure",
-        message: "Request failed",
-        metadata: ["status_code": 500, "retry": true, "tags": ["ios", "api"], "context": ["flow": "sync"]],
-        timestamp: Date(timeIntervalSince1970: 1_700_000_000)
-    )
+        let event = TelemetryEvent(
+            level: .error,
+            name: "network_failure",
+            message: "Request failed",
+            metadata: ["status_code": 500, "retry": true, "tags": ["ios", "api"], "context": ["flow": "sync"]],
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+        )
 
         transport.telemetrySink.record(event)
 
@@ -228,20 +240,20 @@ struct SentinelHTTPTransportTests {
     func analyticsSinkSendsExpectedPayloadAndHeaders() async throws {
         MockURLProtocol.capture.reset()
 
-    let session = makeSession()
-    let transport = SentinelHTTPTransport(
-        baseURL: URL(string: "https://ingest.example.com/v1/events")!,
-        apiKey: "analytics-key",
-        projectSlug: "ios-client",
-        session: session
-    )
+        let session = makeSession()
+        let transport = SentinelHTTPTransport(
+            baseURL: URL(string: "https://ingest.example.com/v1/events")!,
+            apiKey: "analytics-key",
+            projectSlug: "ios-client",
+            session: session
+        )
 
-    let event = AnalyticsEvent(
-        name: "upgrade_tapped",
-        kind: .conversion,
-        properties: ["plan": "pro", "amount": 99],
-        timestamp: Date(timeIntervalSince1970: 1_700_000_100)
-    )
+        let event = AnalyticsEvent(
+            name: "upgrade_tapped",
+            kind: .conversion,
+            properties: ["plan": "pro", "amount": 99],
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100)
+        )
 
         transport.analyticsSink.track(event)
 
