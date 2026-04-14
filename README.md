@@ -28,6 +28,76 @@ Auth header:
 Authorization: Bearer <api-key>
 ```
 
+## Endpoint Resolution (All SDKs)
+
+All SDKs follow the same endpoint resolution contract:
+
+| Priority | Mode | Configuration |
+|----------|------|---------------|
+| 1 | Explicit URL | `baseUrl` / `ingestUrl` / `baseURL` in SDK config |
+| 2 | Environment URL | `SENTINEL_INGEST_URL` |
+| 3 | Derived Firebase URL (backward compatible) | `projectId` (or `SENTINEL_FIREBASE_PROJECT_ID` / `SENTINEL_PROJECT_ID`) + optional region/function |
+| 4 | Error | Actionable error describing all accepted config paths |
+
+Derived URL format:
+
+```text
+https://{region}-{projectId}.cloudfunctions.net/{functionName}
+```
+
+Defaults:
+
+- `region`: `us-central1`
+- `functionName`: `ingestEvent`
+
+Shared env vars:
+
+- Required: `SENTINEL_API_KEY`, `SENTINEL_PROJECT_SLUG`
+- Preferred for cross-project deployments: `SENTINEL_INGEST_URL`
+- Backward-compatible derived mode:
+  - `SENTINEL_FIREBASE_PROJECT_ID` (alias: `SENTINEL_PROJECT_ID`)
+  - `SENTINEL_FIREBASE_REGION`
+  - `SENTINEL_FIREBASE_FUNCTION`
+
+### Migration Guide
+
+- Existing integrations continue working without code changes.
+- For cross-project deployments, set `SENTINEL_INGEST_URL` explicitly and keep using your existing API key + project slug.
+- API key authorizes requests, but endpoint routing still requires URL resolution (explicit/env/derived mode).
+
+### Cross-Project Examples
+
+Swift:
+
+```swift
+let transport = try SentinelHTTPTransport(
+    apiKey: ProcessInfo.processInfo.environment["SENTINEL_API_KEY"]!,
+    projectSlug: ProcessInfo.processInfo.environment["SENTINEL_PROJECT_SLUG"]!,
+    environment: ProcessInfo.processInfo.environment
+)
+```
+
+Android (Java):
+
+```java
+SentinelClient.EndpointConfig endpoint = new SentinelClient.EndpointConfig();
+endpoint.environment = System.getenv(); // uses SENTINEL_INGEST_URL when present
+
+SentinelClient client = new SentinelClient(
+    endpoint,
+    System.getenv("SENTINEL_API_KEY"),
+    System.getenv("SENTINEL_PROJECT_SLUG")
+);
+```
+
+JavaScript / Server:
+
+```javascript
+import { createSentinelClientFromEnv } from "@the-ginger-geek/sentinel-sdk";
+
+const sentinel = createSentinelClientFromEnv();
+```
+
 ### Telemetry Event
 
 ```json
@@ -84,11 +154,11 @@ import AppAnalytics
 import SentinelHTTPTransport
 import Foundation
 
-let transport = SentinelHTTPTransport(
-    baseURL: URL(string: "https://<your-ingest-endpoint>")!,
+let transport = try SentinelHTTPTransport(
     apiKey: "<api-key>",
     projectSlug: "<project-slug>",
-    userId: "<user-id-or-hash>"
+    userId: "<user-id-or-hash>",
+    baseURL: URL(string: "https://<your-ingest-endpoint>")
 )
 
 Sentinel.shared.register(sink: transport.telemetrySink)
@@ -177,6 +247,20 @@ SentinelClient client = new SentinelClient(
 
 // Set user ID for affected-user tracking
 client.setUserId("<user-id-or-hash>");
+```
+
+### Endpoint Resolution (Java)
+
+```java
+SentinelClient.EndpointConfig endpoint = new SentinelClient.EndpointConfig();
+endpoint.baseUrl = "https://<your-ingest-endpoint>"; // optional explicit override
+endpoint.environment = System.getenv();              // supports SENTINEL_INGEST_URL
+
+SentinelClient client = new SentinelClient(
+    endpoint,
+    "<api-key>",
+    "<project-slug>"
+);
 ```
 
 ### Telemetry
@@ -269,6 +353,17 @@ const sentinel = new SentinelClient({
   apiKey: "<api-key>",
   projectSlug: "<project-slug>",
   userId: "<user-id-or-hash>",
+});
+```
+
+### Endpoint Resolution (JavaScript)
+
+```javascript
+import { createSentinelClientFromEnv } from "@the-ginger-geek/sentinel-sdk";
+
+const sentinel = createSentinelClientFromEnv({
+  // Optional explicit override:
+  // baseUrl: "https://custom-ingest.example.com/ingestEvent",
 });
 ```
 

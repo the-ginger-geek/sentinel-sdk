@@ -28,11 +28,18 @@ const sentinel = new SentinelClient({
 ## Firebase Functions Integration
 
 The SDK includes a dedicated helper for Firebase Cloud Functions endpoints.
+Endpoint resolution precedence is:
+
+1. Explicit `baseUrl` / `ingestUrl`
+2. `SENTINEL_INGEST_URL`
+3. Derived Firebase URL (`projectId` + region + function)
 
 ```javascript
 import { createFirebaseFunctionsSentinelClient } from "@the-ginger-geek/sentinel-sdk";
 
 const sentinel = createFirebaseFunctionsSentinelClient({
+  // Optional explicit override (highest priority):
+  // baseUrl: "https://custom-ingest.example.com/ingestEvent",
   projectId: "sentinel-8997b",
   region: "us-central1",       // optional, default: us-central1
   functionName: "ingestEvent", // optional, default: ingestEvent
@@ -51,9 +58,19 @@ import { FirebaseFunctionsSentinelClient } from "@the-ginger-geek/sentinel-sdk";
 const sentinel = FirebaseFunctionsSentinelClient.fromEnv();
 ```
 
+Or use the shared factory across web/server runtimes:
+
+```javascript
+import { createSentinelClientFromEnv } from "@the-ginger-geek/sentinel-sdk";
+
+const sentinel = createSentinelClientFromEnv();
+```
+
 Expected environment variables:
 
-- `SENTINEL_FIREBASE_PROJECT_ID` (required)
+- `SENTINEL_INGEST_URL` (preferred for cross-project deployments)
+- `SENTINEL_FIREBASE_PROJECT_ID` (required when no explicit/env URL)
+- `SENTINEL_PROJECT_ID` (alias for `SENTINEL_FIREBASE_PROJECT_ID`)
 - `SENTINEL_API_KEY` (required)
 - `SENTINEL_PROJECT_SLUG` (required)
 - `SENTINEL_FIREBASE_REGION` (optional, default `us-central1`)

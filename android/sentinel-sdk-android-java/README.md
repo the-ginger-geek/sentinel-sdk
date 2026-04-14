@@ -24,6 +24,46 @@ SentinelClient client = new SentinelClient(
 );
 ```
 
+## Endpoint Resolution
+
+The Android SDK follows the same cross-SDK precedence:
+
+1. Explicit `baseUrl` / `ingestUrl` in `EndpointConfig`
+2. `SENTINEL_INGEST_URL`
+3. Derived Firebase URL using `projectId` (or `SENTINEL_FIREBASE_PROJECT_ID` / `SENTINEL_PROJECT_ID`) + optional region/function
+
+Derived format:
+
+```text
+https://{region}-{projectId}.cloudfunctions.net/{functionName}
+```
+
+Defaults:
+
+- `region`: `us-central1`
+- `functionName`: `ingestEvent`
+
+Recommended for cross-project deployments:
+
+```bash
+SENTINEL_INGEST_URL=https://us-central1-<sentinel-ingest-project>.cloudfunctions.net/ingestEvent
+SENTINEL_API_KEY=<api-key>
+SENTINEL_PROJECT_SLUG=<project-slug>
+```
+
+Java setup:
+
+```java
+SentinelClient.EndpointConfig endpoint = new SentinelClient.EndpointConfig();
+endpoint.environment = System.getenv();
+
+SentinelClient client = new SentinelClient(
+    endpoint,
+    System.getenv("SENTINEL_API_KEY"),
+    System.getenv("SENTINEL_PROJECT_SLUG")
+);
+```
+
 ## Telemetry
 
 Log events at five severity levels:

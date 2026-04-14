@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.function.Consumer;
 
 public final class SentinelClient {
     public enum TelemetryLevel {
@@ -41,8 +42,45 @@ public final class SentinelClient {
         }
     }
 
+    public enum EndpointResolutionMode {
+        EXPLICIT_URL("explicit_url"),
+        ENV_URL("env_url"),
+        DERIVED_FIREBASE("derived_firebase");
+
+        private final String value;
+
+        EndpointResolutionMode(String value) {
+            this.value = value;
+        }
+
+        public String value() {
+            return value;
+        }
+    }
+
     public interface HttpTransport {
         int post(String url, String apiKey, String jsonBody) throws IOException;
+    }
+
+    public static final class EndpointConfig {
+        public String baseUrl;
+        public String ingestUrl;
+        public String projectId;
+        public String region;
+        public String functionName;
+        public Map<String, String> environment;
+
+        public EndpointConfig() {}
+    }
+
+    public static final class EndpointResolution {
+        public final String url;
+        public final EndpointResolutionMode mode;
+
+        public EndpointResolution(String url, EndpointResolutionMode mode) {
+            this.url = url;
+            this.mode = mode;
+        }
     }
 
     private final String baseUrl;
@@ -60,9 +98,9 @@ public final class SentinelClient {
     }
 
     public SentinelClient(String baseUrl, String apiKey, String projectSlug, String userId, HttpTransport transport) {
-        if (baseUrl == null || baseUrl.isEmpty()) throw new IllegalArgumentException("baseUrl is required");
-        if (apiKey == null || apiKey.isEmpty()) throw new IllegalArgumentException("apiKey is required");
-        if (projectSlug == null || projectSlug.isEmpty()) throw new IllegalArgumentException("projectSlug is required");
+        if (isBlank(baseUrl)) throw new IllegalArgumentException("baseUrl is required");
+        if (isBlank(apiKey)) throw new IllegalArgumentException("apiKey is required");
+        if (isBlank(projectSlug)) throw new IllegalArgumentException("projectSlug is required");
         if (transport == null) throw new IllegalArgumentException("transport is required");
 
         this.baseUrl = baseUrl;
@@ -70,6 +108,101 @@ public final class SentinelClient {
         this.projectSlug = projectSlug;
         this.userId = userId;
         this.transport = transport;
+    }
+
+    // New constructor: shared endpoint resolution contract with backward compatibility.
+    public SentinelClient(EndpointConfig endpointConfig, String apiKey, String projectSlug) {
+        this(endpointConfig, apiKey, projectSlug, null, new DefaultHttpTransport(), null);
+    }
+
+    public SentinelClient(EndpointConfig endpointConfig, String apiKey, String projectSlug, HttpTransport transport) {
+        this(endpointConfig, apiKey, projectSlug, null, transport, null);
+    }
+
+    public SentinelClient(
+        EndpointConfig endpointConfig,
+        String apiKey,
+        String projectSlug,
+        String userId,
+        HttpTransport transport,
+        Consumer<String> diagnostics
+    ) {
+        if (isBlank(apiKey)) throw new IllegalArgumentException("apiKey is required");
+        if (isBlank(projectSlug)) throw new IllegalArgumentException("projectSlug is required");
+
+        EndpointResolution resolution = resolveEndpoint(endpointConfig);
+        if (diagnostics != null) {
+            diagnostics.accept("Sentinel endpoint resolution mode: " + resolution.mode.value());
+        }
+
+        this.baseUrl = resolution.url;
+        this.apiKey = apiKey;
+        this.projectSlug = projectSlug;
+        this.userId = userId;
+        this.transport = transport == null ? new DefaultHttpTransport() : transport;
+    }
+
+    public static SentinelClient fromEnv() {
+        return fromEnv(System.getenv(), null, null);
+    }
+
+    public static SentinelClient fromEnv(Map<String, String> env) {
+        return fromEnv(env, null, null);
+    }
+
+    public static SentinelClient fromEnv(Map<String, String> env, HttpTransport transport, Consumer<String> diagnostics) {
+        Map<String, String> sourceEnv = env == null ? System.getenv() : env;
+        String apiKey = firstNonEmpty(sourceEnv.get("SENTINEL_API_KEY"));
+        String projectSlug = firstNonEmpty(sourceEnv.get("SENTINEL_PROJECT_SLUG"));
+
+        if (isBlank(apiKey) || isBlank(projectSlug)) {
+            StringBuilder missing = new StringBuilder();
+            if (isBlank(apiKey)) {
+                missing.append("SENTINEL_API_KEY");
+            }
+            if (isBlank(projectSlug)) {
+                if (missing.length() > 0) missing.append(", ");
+                missing.append("SENTINEL_PROJECT_SLUG");
+            }
+            throw new IllegalArgumentException(
+                "Missing required Sentinel configuration: " + missing + ". " +
+                "Required fields: SENTINEL_API_KEY and SENTINEL_PROJECT_SLUG. " +
+                "Endpoint resolution supports: baseUrl/ingestUrl, SENTINEL_INGEST_URL, or derived Firebase mode. " +
+                "Cross-project deployments should prefer SENTINEL_INGEST_URL."
+            );
+        }
+
+        EndpointConfig endpointConfig = new EndpointConfig();
+        endpointConfig.environment = sourceEnv;
+        return new SentinelClient(endpointConfig, apiKey, projectSlug, null, transport, diagnostics);
+    }
+
+    public static EndpointResolution resolveEndpoint(EndpointConfig endpointConfig) {
+        EndpointConfig config = endpointConfig == null ? new EndpointConfig() : endpointConfig;
+        Map<String, String> env = config.environment == null ? System.getenv() : config.environment;
+
+        String explicitUrl = firstNonEmpty(config.baseUrl, config.ingestUrl);
+        if (explicitUrl != null) {
+            return new EndpointResolution(explicitUrl, EndpointResolutionMode.EXPLICIT_URL);
+        }
+
+        String envUrl = firstNonEmpty(env.get("SENTINEL_INGEST_URL"));
+        if (envUrl != null) {
+            return new EndpointResolution(envUrl, EndpointResolutionMode.ENV_URL);
+        }
+
+        String projectId = firstNonEmpty(config.projectId, env.get("SENTINEL_FIREBASE_PROJECT_ID"), env.get("SENTINEL_PROJECT_ID"));
+        if (projectId != null) {
+            String region = firstNonEmpty(config.region, env.get("SENTINEL_FIREBASE_REGION"));
+            String functionName = firstNonEmpty(config.functionName, env.get("SENTINEL_FIREBASE_FUNCTION"));
+            if (region == null) region = "us-central1";
+            if (functionName == null) functionName = "ingestEvent";
+
+            String derived = "https://" + region + "-" + projectId + ".cloudfunctions.net/" + functionName;
+            return new EndpointResolution(derived, EndpointResolutionMode.DERIVED_FIREBASE);
+        }
+
+        throw new IllegalArgumentException(endpointResolutionGuidance());
     }
 
     public void setUserId(String userId) {
@@ -127,6 +260,26 @@ public final class SentinelClient {
 
         String jsonBody = JsonEncoder.encode(payload);
         return transport.post(baseUrl, apiKey, jsonBody);
+    }
+
+    private static String endpointResolutionGuidance() {
+        return "Unable to resolve Sentinel ingest endpoint. " +
+            "Set one of: baseUrl/ingestUrl in SDK config, or SENTINEL_INGEST_URL in env. " +
+            "For derived mode set projectId (or SENTINEL_FIREBASE_PROJECT_ID / SENTINEL_PROJECT_ID) with optional region/functionName. " +
+            "Cross-project deployments should prefer SENTINEL_INGEST_URL.";
+    }
+
+    private static String firstNonEmpty(String... values) {
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private static String isoNow() {

@@ -2,6 +2,50 @@ import AppAnalytics
 import Foundation
 import SentinelCore
 
+public enum SentinelEndpointResolutionMode: String, Sendable {
+    case explicitURL = "explicit_url"
+    case envURL = "env_url"
+    case derivedFirebase = "derived_firebase"
+}
+
+public struct SentinelEndpointResolution: Sendable {
+    public let url: URL
+    public let mode: SentinelEndpointResolutionMode
+
+    public init(url: URL, mode: SentinelEndpointResolutionMode) {
+        self.url = url
+        self.mode = mode
+    }
+}
+
+public struct SentinelEndpointConfiguration {
+    public var baseURL: URL?
+    public var ingestURL: URL?
+    public var projectID: String?
+    public var region: String?
+    public var functionName: String?
+    public var environment: [String: String]?
+    public var infoDictionary: [String: Any]?
+
+    public init(
+        baseURL: URL? = nil,
+        ingestURL: URL? = nil,
+        projectID: String? = nil,
+        region: String? = nil,
+        functionName: String? = nil,
+        environment: [String: String]? = nil,
+        infoDictionary: [String: Any]? = nil
+    ) {
+        self.baseURL = baseURL
+        self.ingestURL = ingestURL
+        self.projectID = projectID
+        self.region = region
+        self.functionName = functionName
+        self.environment = environment
+        self.infoDictionary = infoDictionary
+    }
+}
+
 public struct SentinelHTTPTransport {
     public let telemetrySink: TelemetrySink
     public let analyticsSink: AnalyticsSink
@@ -10,6 +54,82 @@ public struct SentinelHTTPTransport {
 
     public init(baseURL: URL, apiKey: String, projectSlug: String, userId: String? = nil) {
         self.init(baseURL: baseURL, apiKey: apiKey, projectSlug: projectSlug, userId: userId, session: .shared)
+    }
+
+    public init(
+        apiKey: String,
+        projectSlug: String,
+        userId: String? = nil,
+        baseURL: URL? = nil,
+        ingestURL: URL? = nil,
+        projectID: String? = nil,
+        region: String? = nil,
+        functionName: String? = nil,
+        environment: [String: String]? = nil,
+        infoDictionary: [String: Any]? = nil,
+        diagnostics: ((String) -> Void)? = nil
+    ) throws {
+        let resolution = try Self.resolveIngestEndpoint(
+            SentinelEndpointConfiguration(
+                baseURL: baseURL,
+                ingestURL: ingestURL,
+                projectID: projectID,
+                region: region,
+                functionName: functionName,
+                environment: environment,
+                infoDictionary: infoDictionary
+            )
+        )
+
+        diagnostics?("Sentinel endpoint resolution mode: \(resolution.mode.rawValue)")
+        self.init(baseURL: resolution.url, apiKey: apiKey, projectSlug: projectSlug, userId: userId, session: .shared)
+    }
+
+    public static func resolveIngestEndpoint(_ config: SentinelEndpointConfiguration = .init()) throws -> SentinelEndpointResolution {
+        if let explicit = config.baseURL ?? config.ingestURL {
+            return SentinelEndpointResolution(url: explicit, mode: .explicitURL)
+        }
+
+        let environment = config.environment ?? ProcessInfo.processInfo.environment
+        let infoDictionary = config.infoDictionary ?? Bundle.main.infoDictionary
+
+        if let envURLString = firstNonEmpty(environment["SENTINEL_INGEST_URL"], infoDictionary?["SENTINEL_INGEST_URL"] as? String),
+           let envURL = URL(string: envURLString)
+        {
+            return SentinelEndpointResolution(url: envURL, mode: .envURL)
+        }
+
+        let projectID = firstNonEmpty(
+            config.projectID,
+            environment["SENTINEL_FIREBASE_PROJECT_ID"],
+            environment["SENTINEL_PROJECT_ID"],
+            infoDictionary?["SENTINEL_FIREBASE_PROJECT_ID"] as? String,
+            infoDictionary?["SENTINEL_PROJECT_ID"] as? String
+        )
+
+        if let projectID {
+            let region = firstNonEmpty(
+                config.region,
+                environment["SENTINEL_FIREBASE_REGION"],
+                infoDictionary?["SENTINEL_FIREBASE_REGION"] as? String
+            ) ?? "us-central1"
+
+            let functionName = firstNonEmpty(
+                config.functionName,
+                environment["SENTINEL_FIREBASE_FUNCTION"],
+                infoDictionary?["SENTINEL_FIREBASE_FUNCTION"] as? String
+            ) ?? "ingestEvent"
+
+            guard let url = URL(string: "https://\(region)-\(projectID).cloudfunctions.net/\(functionName)") else {
+                throw EndpointResolutionError.message(
+                    "Unable to build a valid ingest URL from derived Firebase settings. " + resolutionGuidance
+                )
+            }
+
+            return SentinelEndpointResolution(url: url, mode: .derivedFirebase)
+        }
+
+        throw EndpointResolutionError.message("Unable to resolve Sentinel ingest endpoint. " + resolutionGuidance)
     }
 
     init(baseURL: URL, apiKey: String, projectSlug: String, userId: String? = nil, session: URLSession) {
@@ -130,4 +250,35 @@ public struct SentinelHTTPTransport {
             }
         }
     }
+}
+
+private enum EndpointResolutionError: Error {
+    case message(String)
+}
+
+extension EndpointResolutionError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .message(let message):
+            return message
+        }
+    }
+}
+
+private let resolutionGuidance = [
+    "Accepted configuration paths:",
+    "1) baseURL/ingestURL in SDK config (explicit URL)",
+    "2) SENTINEL_INGEST_URL in environment or Info.plist",
+    "3) Derived Firebase mode using projectID/SENTINEL_FIREBASE_PROJECT_ID/SENTINEL_PROJECT_ID with optional region/functionName",
+    "Cross-project deployments should prefer SENTINEL_INGEST_URL.",
+].joined(separator: " ")
+
+private func firstNonEmpty(_ values: String?...) -> String? {
+    for candidate in values {
+        guard let value = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            continue
+        }
+        return value
+    }
+    return nil
 }

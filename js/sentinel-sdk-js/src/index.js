@@ -40,6 +40,65 @@ const toFirebaseFunctionsIngestUrl = ({ projectId, region = "us-central1", funct
   return `https://${region}-${projectId}.cloudfunctions.net/${functionName}`;
 };
 
+const firstNonEmpty = (...values) => values.find((value) => typeof value === "string" && value.trim().length > 0);
+const defaultEnv = () =>
+  typeof process !== "undefined" && process && process.env && isObject(process.env) ? process.env : undefined;
+
+const endpointResolutionError = () =>
+  new Error(
+    [
+      "Unable to resolve Sentinel ingest endpoint.",
+      "Set one of: baseUrl/ingestUrl in config, or SENTINEL_INGEST_URL in env.",
+      "For Firebase derived mode provide projectId (or SENTINEL_FIREBASE_PROJECT_ID / SENTINEL_PROJECT_ID), optional region, optional functionName.",
+      "Cross-project deployments should prefer SENTINEL_INGEST_URL.",
+    ].join(" "),
+  );
+
+const missingRequiredError = (missingFields) =>
+  new Error(
+    [
+      `Missing required Sentinel configuration: ${missingFields.join(", ")}.`,
+      "Required fields: SENTINEL_API_KEY and SENTINEL_PROJECT_SLUG.",
+      "Endpoint resolution supports: baseUrl/ingestUrl, SENTINEL_INGEST_URL, or derived Firebase mode.",
+      "Cross-project deployments should prefer SENTINEL_INGEST_URL.",
+    ].join(" "),
+  );
+
+const resolveIngestEndpoint = ({
+  baseUrl,
+  ingestUrl,
+  projectId,
+  region,
+  functionName,
+  env = defaultEnv(),
+} = {}) => {
+  const explicitUrl = firstNonEmpty(baseUrl, ingestUrl);
+  if (explicitUrl) {
+    return { url: explicitUrl, mode: "explicit_url" };
+  }
+
+  const envUrl = firstNonEmpty(env?.SENTINEL_INGEST_URL);
+  if (envUrl) {
+    return { url: envUrl, mode: "env_url" };
+  }
+
+  const resolvedProjectId = firstNonEmpty(projectId, env?.SENTINEL_FIREBASE_PROJECT_ID, env?.SENTINEL_PROJECT_ID);
+  if (resolvedProjectId) {
+    const resolvedRegion = firstNonEmpty(region, env?.SENTINEL_FIREBASE_REGION) || "us-central1";
+    const resolvedFunction = firstNonEmpty(functionName, env?.SENTINEL_FIREBASE_FUNCTION) || "ingestEvent";
+    return {
+      url: toFirebaseFunctionsIngestUrl({
+        projectId: resolvedProjectId,
+        region: resolvedRegion,
+        functionName: resolvedFunction,
+      }),
+      mode: "derived_firebase",
+    };
+  }
+
+  throw endpointResolutionError();
+};
+
 export class SentinelClient {
   constructor({ baseUrl, apiKey, projectSlug, userId, fetchImpl } = {}) {
     if (!baseUrl) throw new Error("baseUrl is required");
@@ -139,8 +198,40 @@ export class SentinelClient {
 
 export const createSentinelClient = (config) => new SentinelClient(config);
 
+export const createSentinelClientFromEnv = ({
+  env = defaultEnv(),
+  baseUrl,
+  ingestUrl,
+  projectId,
+  region,
+  functionName,
+  apiKey,
+  projectSlug,
+  userId,
+  fetchImpl,
+  onDebug,
+} = {}) => {
+  const key = firstNonEmpty(apiKey, env?.SENTINEL_API_KEY);
+  const slug = firstNonEmpty(projectSlug, env?.SENTINEL_PROJECT_SLUG);
+  const missing = [];
+  if (!key) missing.push("SENTINEL_API_KEY");
+  if (!slug) missing.push("SENTINEL_PROJECT_SLUG");
+  if (missing.length > 0) throw missingRequiredError(missing);
+  const resolution = resolveIngestEndpoint({ baseUrl, ingestUrl, projectId, region, functionName, env });
+  onDebug?.(`Sentinel endpoint resolution mode: ${resolution.mode}`);
+  return new SentinelClient({
+    baseUrl: resolution.url,
+    apiKey: key,
+    projectSlug: slug,
+    userId,
+    fetchImpl,
+  });
+};
+
 export class FirebaseFunctionsSentinelClient extends SentinelClient {
   constructor({
+    baseUrl,
+    ingestUrl,
     projectId,
     region = "us-central1",
     functionName = "ingestEvent",
@@ -148,28 +239,46 @@ export class FirebaseFunctionsSentinelClient extends SentinelClient {
     projectSlug,
     userId,
     fetchImpl,
+    env = defaultEnv(),
+    onDebug,
   } = {}) {
-    const baseUrl = toFirebaseFunctionsIngestUrl({ projectId, region, functionName });
-    super({ baseUrl, apiKey, projectSlug, userId, fetchImpl });
+    const resolution = resolveIngestEndpoint({
+      baseUrl,
+      ingestUrl,
+      projectId,
+      region,
+      functionName,
+      env,
+    });
+    onDebug?.(`Sentinel endpoint resolution mode: ${resolution.mode}`);
+    super({ baseUrl: resolution.url, apiKey, projectSlug, userId, fetchImpl });
     this.projectId = projectId;
     this.region = region;
     this.functionName = functionName;
+    this.endpointResolutionMode = resolution.mode;
   }
 
-  static fromEnv({ env = process?.env, fetchImpl } = {}) {
-    const projectId = required(env?.SENTINEL_FIREBASE_PROJECT_ID, "SENTINEL_FIREBASE_PROJECT_ID");
-    const apiKey = required(env?.SENTINEL_API_KEY, "SENTINEL_API_KEY");
-    const projectSlug = required(env?.SENTINEL_PROJECT_SLUG, "SENTINEL_PROJECT_SLUG");
-    const region = env?.SENTINEL_FIREBASE_REGION || "us-central1";
-    const functionName = env?.SENTINEL_FIREBASE_FUNCTION || "ingestEvent";
+  static fromEnv({ env = defaultEnv(), fetchImpl, onDebug } = {}) {
+    const apiKey = firstNonEmpty(env?.SENTINEL_API_KEY);
+    const projectSlug = firstNonEmpty(env?.SENTINEL_PROJECT_SLUG);
+    const missing = [];
+    if (!apiKey) missing.push("SENTINEL_API_KEY");
+    if (!projectSlug) missing.push("SENTINEL_PROJECT_SLUG");
+    if (missing.length > 0) throw missingRequiredError(missing);
+    const region = firstNonEmpty(env?.SENTINEL_FIREBASE_REGION) || "us-central1";
+    const functionName = firstNonEmpty(env?.SENTINEL_FIREBASE_FUNCTION) || "ingestEvent";
+    const projectId = firstNonEmpty(env?.SENTINEL_FIREBASE_PROJECT_ID, env?.SENTINEL_PROJECT_ID);
 
     return new FirebaseFunctionsSentinelClient({
+      baseUrl: env?.SENTINEL_INGEST_URL,
       projectId,
       region,
       functionName,
       apiKey,
       projectSlug,
       fetchImpl,
+      env,
+      onDebug,
     });
   }
 }
@@ -177,4 +286,4 @@ export class FirebaseFunctionsSentinelClient extends SentinelClient {
 export const createFirebaseFunctionsSentinelClient = (config) =>
   new FirebaseFunctionsSentinelClient(config);
 
-export { toFirebaseFunctionsIngestUrl };
+export { toFirebaseFunctionsIngestUrl, resolveIngestEndpoint };

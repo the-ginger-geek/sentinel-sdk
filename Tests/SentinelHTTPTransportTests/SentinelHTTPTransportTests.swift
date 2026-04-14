@@ -103,6 +103,78 @@ private func requestBodyData(_ request: URLRequest) -> Data? {
 @Suite(.serialized)
 struct SentinelHTTPTransportTests {
     @Test
+    func endpointResolutionPrefersExplicitURL() throws {
+        let resolution = try SentinelHTTPTransport.resolveIngestEndpoint(
+            .init(
+                baseURL: URL(string: "https://explicit.example.com/ingestEvent"),
+                projectID: "sentinel-8997b",
+                environment: ["SENTINEL_INGEST_URL": "https://env.example.com/ingestEvent"]
+            )
+        )
+
+        #expect(resolution.mode == .explicitURL)
+        #expect(resolution.url.absoluteString == "https://explicit.example.com/ingestEvent")
+    }
+
+    @Test
+    func endpointResolutionUsesEnvURLBeforeDerived() throws {
+        let resolution = try SentinelHTTPTransport.resolveIngestEndpoint(
+            .init(
+                environment: [
+                    "SENTINEL_INGEST_URL": "https://env.example.com/ingestEvent",
+                    "SENTINEL_FIREBASE_PROJECT_ID": "sentinel-8997b",
+                ]
+            )
+        )
+
+        #expect(resolution.mode == .envURL)
+        #expect(resolution.url.absoluteString == "https://env.example.com/ingestEvent")
+    }
+
+    @Test
+    func endpointResolutionSupportsInfoDictionaryEnvURL() throws {
+        let resolution = try SentinelHTTPTransport.resolveIngestEndpoint(
+            .init(
+                environment: [:],
+                infoDictionary: ["SENTINEL_INGEST_URL": "https://plist.example.com/ingestEvent"]
+            )
+        )
+
+        #expect(resolution.mode == .envURL)
+        #expect(resolution.url.absoluteString == "https://plist.example.com/ingestEvent")
+    }
+
+    @Test
+    func endpointResolutionSupportsDerivedAliasProjectID() throws {
+        let resolution = try SentinelHTTPTransport.resolveIngestEndpoint(
+            .init(
+                environment: [
+                    "SENTINEL_PROJECT_ID": "sentinel-8997b",
+                    "SENTINEL_FIREBASE_REGION": "europe-west1",
+                    "SENTINEL_FIREBASE_FUNCTION": "ingestEvent",
+                ]
+            )
+        )
+
+        #expect(resolution.mode == .derivedFirebase)
+        #expect(resolution.url.absoluteString == "https://europe-west1-sentinel-8997b.cloudfunctions.net/ingestEvent")
+    }
+
+    @Test
+    func endpointResolutionFailureIsActionable() {
+        do {
+            _ = try SentinelHTTPTransport.resolveIngestEndpoint(.init(environment: [:], infoDictionary: [:]))
+            Issue.record("Expected endpoint resolution to fail")
+        } catch {
+            let description = (error as NSError).localizedDescription
+            #expect(description.contains("baseURL/ingestURL"))
+            #expect(description.contains("SENTINEL_INGEST_URL"))
+            #expect(description.contains("SENTINEL_FIREBASE_PROJECT_ID"))
+            #expect(description.contains("Cross-project deployments"))
+        }
+    }
+
+    @Test
     func telemetrySinkSendsExpectedPayloadAndHeaders() async throws {
         MockURLProtocol.capture.reset()
 
@@ -194,5 +266,32 @@ struct SentinelHTTPTransportTests {
         let properties = payloadEvent?["properties"] as? [String: Any]
         #expect(properties?["plan"] as? String == "pro")
         #expect(properties?["amount"] as? Int == 99)
+    }
+
+    @Test
+    func resolvedTransportUsesSameEndpointForTelemetryAndAnalytics() async throws {
+        MockURLProtocol.capture.reset()
+
+        let session = makeSession()
+        let testTransport = SentinelHTTPTransport(
+            baseURL: try SentinelHTTPTransport.resolveIngestEndpoint(
+                .init(environment: ["SENTINEL_INGEST_URL": "https://resolved.example.com/ingestEvent"])
+            ).url,
+            apiKey: "test-key",
+            projectSlug: "cross-sdk",
+            session: session
+        )
+
+        testTransport.telemetrySink.record(
+            TelemetryEvent(level: .info, name: "telemetry_a", timestamp: Date(timeIntervalSince1970: 1_700_000_500))
+        )
+        testTransport.analyticsSink.track(
+            AnalyticsEvent(name: "analytics_b", kind: .action, timestamp: Date(timeIntervalSince1970: 1_700_000_501))
+        )
+
+        let requests = await waitForRequestCount(2)
+        #expect(requests.count == 2)
+        #expect(requests[0].url?.absoluteString == "https://resolved.example.com/ingestEvent")
+        #expect(requests[1].url?.absoluteString == "https://resolved.example.com/ingestEvent")
     }
 }

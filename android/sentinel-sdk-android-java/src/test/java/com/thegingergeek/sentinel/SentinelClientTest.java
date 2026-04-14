@@ -11,6 +11,11 @@ public final class SentinelClientTest {
         run("trackSendsAnalyticsPayload", SentinelClientTest::trackSendsAnalyticsPayload);
         run("screenUsesScreenKind", SentinelClientTest::screenUsesScreenKind);
         run("recordErrorAddsErrorMetadata", SentinelClientTest::recordErrorAddsErrorMetadata);
+        run("endpointResolutionPrefersExplicitURL", SentinelClientTest::endpointResolutionPrefersExplicitURL);
+        run("endpointResolutionUsesEnvURLBeforeDerived", SentinelClientTest::endpointResolutionUsesEnvURLBeforeDerived);
+        run("endpointResolutionSupportsDerivedProjectAlias", SentinelClientTest::endpointResolutionSupportsDerivedProjectAlias);
+        run("endpointResolutionFailureIsActionable", SentinelClientTest::endpointResolutionFailureIsActionable);
+        run("fromEnvMissingRequiredFieldsIsActionable", SentinelClientTest::fromEnvMissingRequiredFieldsIsActionable);
         run("constructorValidatesRequiredFields", SentinelClientTest::constructorValidatesRequiredFields);
         run("jsonEncoderEscapesSpecialCharacters", SentinelClientTest::jsonEncoderEscapesSpecialCharacters);
 
@@ -100,6 +105,65 @@ public final class SentinelClientTest {
         expectIllegalArgument(() -> new SentinelClient("", "k", "p"));
         expectIllegalArgument(() -> new SentinelClient("https://example.com", "", "p"));
         expectIllegalArgument(() -> new SentinelClient("https://example.com", "k", ""));
+    }
+
+    private static void endpointResolutionPrefersExplicitURL() {
+        SentinelClient.EndpointConfig config = new SentinelClient.EndpointConfig();
+        config.baseUrl = "https://explicit.example.com/ingestEvent";
+        config.projectId = "ignored-project";
+        config.environment = Map.of("SENTINEL_INGEST_URL", "https://env.example.com/ingestEvent");
+
+        SentinelClient.EndpointResolution resolution = SentinelClient.resolveEndpoint(config);
+        assertEquals(SentinelClient.EndpointResolutionMode.EXPLICIT_URL, resolution.mode, "mode");
+        assertEquals("https://explicit.example.com/ingestEvent", resolution.url, "url");
+    }
+
+    private static void endpointResolutionUsesEnvURLBeforeDerived() {
+        SentinelClient.EndpointConfig config = new SentinelClient.EndpointConfig();
+        config.environment = Map.of(
+            "SENTINEL_INGEST_URL", "https://env.example.com/ingestEvent",
+            "SENTINEL_FIREBASE_PROJECT_ID", "sentinel-8997b"
+        );
+
+        SentinelClient.EndpointResolution resolution = SentinelClient.resolveEndpoint(config);
+        assertEquals(SentinelClient.EndpointResolutionMode.ENV_URL, resolution.mode, "mode");
+        assertEquals("https://env.example.com/ingestEvent", resolution.url, "url");
+    }
+
+    private static void endpointResolutionSupportsDerivedProjectAlias() {
+        SentinelClient.EndpointConfig config = new SentinelClient.EndpointConfig();
+        config.environment = Map.of(
+            "SENTINEL_PROJECT_ID", "sentinel-8997b",
+            "SENTINEL_FIREBASE_REGION", "europe-west1",
+            "SENTINEL_FIREBASE_FUNCTION", "ingestEvent"
+        );
+
+        SentinelClient.EndpointResolution resolution = SentinelClient.resolveEndpoint(config);
+        assertEquals(SentinelClient.EndpointResolutionMode.DERIVED_FIREBASE, resolution.mode, "mode");
+        assertEquals("https://europe-west1-sentinel-8997b.cloudfunctions.net/ingestEvent", resolution.url, "url");
+    }
+
+    private static void endpointResolutionFailureIsActionable() {
+        try {
+            SentinelClient.resolveEndpoint(new SentinelClient.EndpointConfig());
+            throw new AssertionError("expected IllegalArgumentException");
+        } catch (IllegalArgumentException expected) {
+            assertContains(expected.getMessage(), "baseUrl/ingestUrl");
+            assertContains(expected.getMessage(), "SENTINEL_INGEST_URL");
+            assertContains(expected.getMessage(), "SENTINEL_FIREBASE_PROJECT_ID");
+            assertContains(expected.getMessage(), "Cross-project deployments");
+        }
+    }
+
+    private static void fromEnvMissingRequiredFieldsIsActionable() {
+        try {
+            SentinelClient.fromEnv(Map.of("SENTINEL_INGEST_URL", "https://env.example.com/ingestEvent"));
+            throw new AssertionError("expected IllegalArgumentException");
+        } catch (IllegalArgumentException expected) {
+            assertContains(expected.getMessage(), "SENTINEL_API_KEY");
+            assertContains(expected.getMessage(), "SENTINEL_PROJECT_SLUG");
+            assertContains(expected.getMessage(), "Cross-project deployments");
+        }
     }
 
     private static void jsonEncoderEscapesSpecialCharacters() {
